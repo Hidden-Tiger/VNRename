@@ -6,7 +6,10 @@ from datetime import datetime
 import difflib
 
 from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor
-from PyQt6.QtCore import Qt, QSize, QRect, QPropertyAnimation, pyqtSignal, QSettings
+from PyQt6.QtCore import (
+    Qt, QSize, QRect, QPropertyAnimation, pyqtSignal, QSettings, QUrl, QObject
+)
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QLabel, QLineEdit,
     QPushButton, QListWidget, QListWidgetItem, QFileDialog, QVBoxLayout,
@@ -128,6 +131,91 @@ def apply_censor_to_label(label: QLabel, pm: QPixmap,
         eff = QGraphicsBlurEffect()
         eff.setBlurRadius(12)
         label.setGraphicsEffect(eff)
+
+
+# -------------------- image loading --------------------
+IMAGE_CACHE: dict[tuple[str, int], QPixmap] = {}
+_PLACEHOLDER_CACHE: dict[int, QPixmap] = {}
+
+
+def _placeholder_pixmap(size: int) -> QPixmap:
+    pm = _PLACEHOLDER_CACHE.get(size)
+    if pm is None:
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.lightGray)
+        _PLACEHOLDER_CACHE[size] = pm
+    return pm
+
+
+class ImageFetcher(QObject):
+    """Fetches images asynchronously using Qt network stack."""
+
+    fetched = pyqtSignal(str, int, QPixmap)  # url, size, pixmap
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+        self._nam.finished.connect(self._finished)
+
+    def fetch(self, url: str, size: int) -> None:
+        request = QNetworkRequest(QUrl(url))
+        reply = self._nam.get(request)
+        reply._url = url
+        reply._size = size
+
+    def _finished(self, reply) -> None:  # QNetworkReply
+        url = getattr(reply, "_url", "")
+        size = getattr(reply, "_size", 0)
+        data = bytes(reply.readAll())
+        pm = QPixmap()
+        pm.loadFromData(data)
+        if size:
+            pm = pm.scaled(
+                size,
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        self.fetched.emit(url, size, pm)
+        reply.deleteLater()
+
+
+class AsyncImageLoader(QObject):
+    """Caches and delivers scaled pixmaps to labels asynchronously."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._fetcher = ImageFetcher(self)
+        self._fetcher.fetched.connect(self._apply)
+        self._pending: dict[tuple[str, int], list[tuple[QLabel, bool, str, bool]]] = {}
+
+    def load(
+        self,
+        label: QLabel,
+        url: str,
+        size: int,
+        censor_enabled: bool = True,
+        censor_mode: str = "blur",
+        is_adult: bool = False,
+    ) -> None:
+        key = (url, size)
+        if key in IMAGE_CACHE:
+            apply_censor_to_label(label, IMAGE_CACHE[key], enabled=censor_enabled, mode=censor_mode, is_adult=is_adult)
+            return
+        label.setPixmap(_placeholder_pixmap(size))
+        self._pending.setdefault(key, []).append((label, censor_enabled, censor_mode, is_adult))
+        if len(self._pending[key]) == 1:
+            self._fetcher.fetch(url, size)
+
+    def _apply(self, url: str, size: int, pm: QPixmap) -> None:
+        key = (url, size)
+        IMAGE_CACHE[key] = pm
+        for label, enabled, mode, adult in self._pending.get(key, []):
+            apply_censor_to_label(label, pm, enabled=enabled, mode=mode, is_adult=adult)
+        self._pending.pop(key, None)
+
+
+ASYNC_IMAGE_LOADER = AsyncImageLoader()
 
 # -------------------- UI widgets --------------------
 class CollapsiblePanel(QWidget):
@@ -393,23 +481,18 @@ class CandidateDetailDialog(QDialog):
         self.img_label = QLabel()
         self.img_label.setFixedSize(300, 300)
         img_info = self.candidate.get("image", {})
-        if isinstance(img_info, dict) and "url" in img_info:
-            try:
-                response = requests.get(img_info["url"], stream=True, timeout=10)
-                response.raise_for_status()
-                pm = QPixmap()
-                pm.loadFromData(response.content)
-                pm = pm.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio,
-                               Qt.TransformationMode.SmoothTransformation)
-                apply_censor_to_label(
-                    self.img_label,
-                    pm,
-                    enabled=getattr(self, "censor_enabled", True),
-                    mode=normalize_censor_mode(getattr(self, "censor_mode", "blur")),
-                    is_adult=is_adult_candidate(self.candidate)
-                )
-            except Exception as e:
-                print("Image error:", e)
+        url = img_info.get("url") if isinstance(img_info, dict) else None
+        if url:
+            ASYNC_IMAGE_LOADER.load(
+                self.img_label,
+                url,
+                300,
+                censor_enabled=getattr(self, "censor_enabled", True),
+                censor_mode=normalize_censor_mode(getattr(self, "censor_mode", "blur")),
+                is_adult=is_adult_candidate(self.candidate),
+            )
+        else:
+            self.img_label.setPixmap(_placeholder_pixmap(300))
         info.addWidget(self.img_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Text
@@ -448,25 +531,21 @@ class CandidateDetailDialog(QDialog):
             row = 1
             for rel in official:
                 img = QLabel()
+                img.setFixedSize(100, 100)
                 rimg = rel.get("image", {})
                 rid = rel.get("id")
                 url = rimg.get("url") if isinstance(rimg, dict) else None
                 if url:
-                    try:
-                        r = requests.get(url, stream=True, timeout=10)
-                        r.raise_for_status()
-                        pm = QPixmap()
-                        pm.loadFromData(r.content)
-                        pm = pm.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio,
-                                       Qt.TransformationMode.SmoothTransformation)
-                        apply_censor_to_label(
-                            img, pm,
-                            enabled=getattr(self, "censor_enabled", True),
-                            mode=normalize_censor_mode(getattr(self, "censor_mode", "blur")),
-                            is_adult=is_adult_relation(rel)
-                        )
-                    except Exception as e:
-                        print("Relation image error:", e)
+                    ASYNC_IMAGE_LOADER.load(
+                        img,
+                        url,
+                        100,
+                        censor_enabled=getattr(self, "censor_enabled", True),
+                        censor_mode=normalize_censor_mode(getattr(self, "censor_mode", "blur")),
+                        is_adult=is_adult_relation(rel),
+                    )
+                else:
+                    img.setPixmap(_placeholder_pixmap(100))
                 grid.addWidget(img, row, 0)
                 grid.addWidget(QLabel(relation_map.get(rel.get("relation", "Unknown"), rel.get("relation", "Unknown"))), row, 1)
                 grid.addWidget(QLabel(rel.get("title", "Unknown")), row, 2)
@@ -492,23 +571,24 @@ class CandidateTile(QWidget):
         self.image_label = QLabel()
         self.image_label.setFixedSize(150, 150)
         img_info = candidate.get("image", {})
-        if isinstance(img_info, dict) and "url" in img_info:
-            try:
-                r = requests.get(img_info["url"], stream=True, timeout=10)
-                r.raise_for_status()
-                pm = QPixmap()
-                pm.loadFromData(r.content)
-                pm = pm.scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio,
-                               Qt.TransformationMode.SmoothTransformation)
-                apply_censor_to_label(
-                    self.image_label,
-                    pm,
-                    enabled=getattr(parent, "censor_checkbox", None).isChecked() if parent and getattr(parent, "censor_checkbox", None) else True,
-                    mode=normalize_censor_mode(getattr(parent, "censor_mode", None).currentText() if parent and getattr(parent, "censor_mode", None) else "Blur"),
-                    is_adult=is_adult_candidate(candidate)
-                )
-            except Exception as e:
-                print("Image error:", e)
+        url = img_info.get("url") if isinstance(img_info, dict) else None
+        if url:
+            ASYNC_IMAGE_LOADER.load(
+                self.image_label,
+                url,
+                150,
+                censor_enabled=getattr(parent, "censor_checkbox", None).isChecked()
+                if parent and getattr(parent, "censor_checkbox", None)
+                else True,
+                censor_mode=normalize_censor_mode(
+                    getattr(parent, "censor_mode", None).currentText()
+                    if parent and getattr(parent, "censor_mode", None)
+                    else "Blur"
+                ),
+                is_adult=is_adult_candidate(candidate),
+            )
+        else:
+            self.image_label.setPixmap(_placeholder_pixmap(150))
         main.addWidget(self.image_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         # text column
