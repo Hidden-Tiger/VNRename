@@ -272,22 +272,49 @@ def get_vn_candidates(search_query, expected_date="", expected_producer="", cand
 
 def search_release(vn_id: str):
     """
-    Try to fetch official releases for the VN.
-    If nothing comes back, return None (and we’ll just use VN-level data).
+    Retrieve release information for the given VN id from VNDB.
+
+    Uses the /kana/release endpoint with a filter of ["vn", "=", ["id", "=",
+    vn_id]]. Accepts vn_id with or without a leading "v" and normalizes it
+    before sending to the API. Handles responses where release data may be
+    stored under "result", "results", or "releases". Returns the first
+    official release if available, otherwise the first release. Returns None
+    if no data is found or an error occurs.
     """
-    # Try both "v####" and numeric id; return first hit
-    vn_num = vn_id[1:] if str(vn_id).startswith("v") else str(vn_id)
-    for value in (f"v{vn_num}", vn_num):
-        data = _post("https://api.vndb.org/kana/release", {
-            "filters": ["vn", "=", value],
-            "fields": "title,released,producers.name,producers.developer,official,minage"
-        })
-        if data and isinstance(data.get("results"), list) and data["results"]:
-            for rel in data["results"]:
-                if rel.get("official"):
-                    return rel
-            return data["results"][0]
-    return None
+    vn_id = str(vn_id)
+    if not vn_id.startswith("v"):
+        vn_id = f"v{vn_id}"
+
+    payload = {
+        "filters": ["vn", "=", ["id", "=", vn_id]],
+        "fields": "title,released,producers.name,producers.developer,official",
+    }
+    data = _post("https://api.vndb.org/kana/release", payload)
+    if not data:
+        return None
+
+    if isinstance(data, list):
+        releases = data
+    elif isinstance(data, dict):
+        if isinstance(data.get("result"), list):
+            releases = data["result"]
+        elif isinstance(data.get("results"), list):
+            releases = data["results"]
+        elif isinstance(data.get("releases"), list):
+            releases = data["releases"]
+        else:
+            releases = []
+    else:
+        releases = []
+
+    if not releases:
+        return None
+
+    for rel in releases:
+        if rel.get("official"):
+            return rel
+    return releases[0]
+
 
 # -------------------- naming --------------------
 def suggest_new_folder_name(vn_info, release_info, optional_flags=None, optional_tags=None, custom_template=None, title_override=None):

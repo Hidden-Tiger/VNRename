@@ -134,14 +134,18 @@ def search_release(vn_id):
 
     Sends a POST request to /kana/release with fields:
       title, released, producers.name, producers.developer, official.
-    The filter now uses ["id", "=", vn_id] to avoid HTTP 400 errors.
-    Checks for both "result" and "results" keys.
+    Uses the filter ["vn", "=", ["id", "=", vn_id]] to select releases by
+    visual novel id. Checks for both "result" and "results" keys.
     Returns the first official release if available; otherwise, the first release.
     """
     url = "https://api.vndb.org/kana/release"
     headers = {"Content-Type": "application/json"}
+    vn_id = str(vn_id)
+    if not vn_id.startswith("v"):
+        vn_id = f"v{vn_id}"
+
     payload = {
-        "filters": ["id", "=", vn_id],
+        "filters": ["vn", "=", ["id", "=", vn_id]],
         "fields": "title,released,producers.name,producers.developer,official"
     }
 
