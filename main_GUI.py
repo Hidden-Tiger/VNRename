@@ -624,16 +624,38 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_splitter)
 
         # Left
-        left = QWidget(); left_v = QVBoxLayout(left); left_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left = QWidget()
+        left_v = QVBoxLayout(left)
+        left_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left_v.setContentsMargins(12, 12, 12, 12)
+        left_v.setSpacing(12)
+
         dir_row = QHBoxLayout()
+        dir_row.setSpacing(8)
         self.dir_label = QLabel("Selected Directory:")
-        self.dir_edit = QLineEdit(""); self.dir_edit.editingFinished.connect(self.refresh_folder_list)
-        dir_row.addWidget(self.dir_label); dir_row.addWidget(self.dir_edit)
+        self.dir_label.setMinimumWidth(80)
+        f_dir = QFont(); f_dir.setPointSize(13); f_dir.setBold(True)
+        self.dir_label.setFont(f_dir)
+        self.dir_edit = QLineEdit("")
+        self.dir_edit.setMinimumHeight(30)
+        self.dir_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.dir_edit.editingFinished.connect(self.refresh_folder_list)
+        dir_row.addWidget(self.dir_label)
+        dir_row.addWidget(self.dir_edit)
         left_v.addLayout(dir_row)
-        btn = QPushButton("Select Directory"); btn.setMaximumSize(150, 30); btn.clicked.connect(self.select_directory)
+
+        btn = QPushButton("Select Directory")
+        btn.setMaximumSize(150, 30)
+        btn.clicked.connect(self.select_directory)
         left_v.addWidget(btn)
-        left_v.addWidget(QLabel("Folders in Directory:"))
-        self.folder_list = QListWidget(); self.folder_list.itemClicked.connect(self.load_folder_details)
+
+        folders_label = QLabel("Folders in Directory:")
+        folders_label.setFont(f_dir)
+        left_v.addWidget(folders_label)
+
+        self.folder_list = QListWidget()
+        self.folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.folder_list.itemClicked.connect(self.load_folder_details)
         left_v.addWidget(self.folder_list)
         if self.directory:
             self.dir_edit.setText(self.directory); self.refresh_folder_list()
@@ -647,10 +669,26 @@ class MainWindow(QMainWindow):
         mid_v.addWidget(self.extracted_title_label); mid_v.addWidget(self.title_edit)
         self.expected_info_label = QLabel("Expected Release Date and Producer:"); mid_v.addWidget(self.expected_info_label)
         search_row = QHBoxLayout()
-        self.search_button = QPushButton("Search Candidates"); self.search_button.setMaximumSize(150, 30)
-        self.search_button.clicked.connect(self.search_candidates); search_row.addWidget(self.search_button); search_row.addStretch()
+        self.censor_checkbox = QCheckBox("Censor 18+ images")
+        self.censor_checkbox.setChecked(True)
+        search_row.addWidget(self.censor_checkbox)
+
+        self.censor_mode = QComboBox()
+        self.censor_mode.addItems(["Blur", "Cover"])
+        search_row.addWidget(self.censor_mode)
+
+        self.censor_checkbox.toggled.connect(self.refresh_candidate_tiles)
+        self.censor_mode.currentIndexChanged.connect(self.refresh_candidate_tiles)
+
+        self.search_button = QPushButton("Search Candidates");
+        self.search_button.setMaximumSize(150, 30)
+        self.search_button.clicked.connect(self.search_candidates);
+        search_row.addWidget(self.search_button);
+        search_row.addStretch()
         search_row.addWidget(QLabel("Number of Candidates:"))
-        self.candidate_count_spin = QSpinBox(); self.candidate_count_spin.setRange(1, 20); self.candidate_count_spin.setValue(5)
+        self.candidate_count_spin = QSpinBox();
+        self.candidate_count_spin.setRange(1, 20);
+        self.candidate_count_spin.setValue(5)
         search_row.addWidget(self.candidate_count_spin)
         mid_v.addLayout(search_row)
         self.candidate_list = QListWidget()
@@ -661,15 +699,20 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(mid)
 
         # Right
-        right = QWidget(); right_v = QVBoxLayout(right); right_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right = QWidget(); right_v = QVBoxLayout(right)
+        right_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right_v.setContentsMargins(12, 12, 12, 12)
+        right_v.setSpacing(12)
         # Label above field + larger fonts
         self.suggested_label = QLabel("Suggested New Folder Name:")
         self.suggested_label.setMinimumWidth(80)
         f_lbl = QFont(); f_lbl.setPointSize(13); f_lbl.setBold(True); self.suggested_label.setFont(f_lbl)
-        self.suggested_name_edit = QLineEdit(); self.suggested_name_edit.setClearButtonEnabled(True)
+        self.suggested_name_edit = QLineEdit()
+        self.suggested_name_edit.setClearButtonEnabled(True)
         f_edit = self.font(); f_edit.setPointSize(11); self.suggested_name_edit.setFont(f_edit)
         self.suggested_name_edit.setMinimumHeight(30)
-        self.suggested_name_edit.setMaximumWidth(80)
+        self.suggested_name_edit.setMinimumWidth(250)
+        self.suggested_name_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         right_v.addWidget(self.suggested_label)
         right_v.addWidget(self.suggested_name_edit)
 
@@ -682,20 +725,9 @@ class MainWindow(QMainWindow):
         self.use_jp_checkbox = QCheckBox("Use Japanese (original) Title")
         self.use_jp_checkbox.toggled.connect(self.update_suggested_name)
         toggles.addWidget(self.use_jp_checkbox)
-        self.shortcut_checkbox = QCheckBox("Generate VNDB Shortcut (.url)"); toggles.addWidget(self.shortcut_checkbox)
+        self.shortcut_checkbox = QCheckBox("Generate VNDB Shortcut (.url)")
+        toggles.addWidget(self.shortcut_checkbox)
         og_v.addLayout(toggles)
-
-        self.censor_checkbox = QCheckBox("Censor 18+ images")
-        self.censor_checkbox.setChecked(True)
-        toggles.addWidget(self.censor_checkbox)
-
-        self.censor_mode = QComboBox()
-        self.censor_mode.addItems(["Blur", "Cover"])
-        toggles.addWidget(self.censor_mode)
-
-        # When toggled/changed, re-render the tiles in place
-        self.censor_checkbox.toggled.connect(self.refresh_candidate_tiles)
-        self.censor_mode.currentIndexChanged.connect(self.refresh_candidate_tiles)
 
         self.flag_checkboxes = {}
         flags_layout = QHBoxLayout()
