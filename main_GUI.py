@@ -662,40 +662,62 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(left)
 
         # Middle
-        mid = QWidget(); mid_v = QVBoxLayout(mid); mid_v.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.original_label = QLabel("Original Folder Name:"); self.original_value = QLabel("")
-        mid_v.addWidget(self.original_label); mid_v.addWidget(self.original_value)
-        self.extracted_title_label = QLabel("Extracted Title for API Search:"); self.title_edit = QLineEdit("")
-        mid_v.addWidget(self.extracted_title_label); mid_v.addWidget(self.title_edit)
-        self.expected_info_label = QLabel("Expected Release Date and Producer:"); mid_v.addWidget(self.expected_info_label)
-        search_row = QHBoxLayout()
+        mid = QWidget()
+        mid_v = QVBoxLayout(mid)
+        mid_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        mid_v.setContentsMargins(12, 12, 12, 12)
+        mid_v.setSpacing(12)
+
+        # Group for folder details
+        details_group = QGroupBox("Folder Details")
+        details_layout = QFormLayout(details_group)
+        self.original_value = QLabel("")
+        details_layout.addRow("Original Folder Name:", self.original_value)
+        self.title_edit = QLineEdit("")
+        self.title_edit.setPlaceholderText("Enter title to search")
+        details_layout.addRow("Extracted Title for API Search:", self.title_edit)
+        self.expected_info_label = QLabel("Expected Release Date and Producer:")
+        details_layout.addRow(self.expected_info_label)
+        mid_v.addWidget(details_group)
+
+        # Group for searching and candidate list
+        search_group = QGroupBox("Candidate Search")
+        search_v = QVBoxLayout(search_group)
+
+        censor_row = QHBoxLayout()
         self.censor_checkbox = QCheckBox("Censor 18+ images")
         self.censor_checkbox.setChecked(True)
-        search_row.addWidget(self.censor_checkbox)
+        censor_row.addWidget(self.censor_checkbox)
 
         self.censor_mode = QComboBox()
         self.censor_mode.addItems(["Blur", "Cover"])
-        search_row.addWidget(self.censor_mode)
+        censor_row.addWidget(self.censor_mode)
+        censor_row.addStretch()
+        search_v.addLayout(censor_row)
 
         self.censor_checkbox.toggled.connect(self.refresh_candidate_tiles)
         self.censor_mode.currentIndexChanged.connect(self.refresh_candidate_tiles)
 
-        self.search_button = QPushButton("Search Candidates");
+        search_row = QHBoxLayout()
+        self.search_button = QPushButton("Search Candidates")
         self.search_button.setMaximumSize(150, 30)
-        self.search_button.clicked.connect(self.search_candidates);
-        search_row.addWidget(self.search_button);
+        self.search_button.clicked.connect(self.search_candidates)
+        search_row.addWidget(self.search_button)
         search_row.addStretch()
         search_row.addWidget(QLabel("Number of Candidates:"))
-        self.candidate_count_spin = QSpinBox();
-        self.candidate_count_spin.setRange(1, 20);
+        self.candidate_count_spin = QSpinBox()
+        self.candidate_count_spin.setRange(1, 20)
         self.candidate_count_spin.setValue(5)
         search_row.addWidget(self.candidate_count_spin)
-        mid_v.addLayout(search_row)
+        search_v.addLayout(search_row)
+
         self.candidate_list = QListWidget()
         self.candidate_list.itemClicked.connect(self.select_candidate)
         self.candidate_list.itemDoubleClicked.connect(self.open_candidate_detail)
-        mid_v.addWidget(QLabel("Candidates:"))
-        mid_v.addWidget(self.candidate_list)
+        search_v.addWidget(QLabel("Candidates:"))
+        search_v.addWidget(self.candidate_list)
+
+        mid_v.addWidget(search_group)
         main_splitter.addWidget(mid)
 
         # Right
